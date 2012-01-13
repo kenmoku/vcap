@@ -90,6 +90,9 @@ module ClientConnection
 
   # We have the HTTP Headers complete from the client
   def on_headers_complete(headers)
+    Router.log.debug "#{headers[HOST_HEADER]}"
+#    headers[HOST_HEADER].gsub!(/:?[0-9]*$/, "")
+    
     return close_connection unless headers and host = headers[HOST_HEADER]
 
     # Support for HTTP/1.1 connection reuse and possible pipelining

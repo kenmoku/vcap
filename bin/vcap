@@ -435,11 +435,14 @@ module Run
   private
 
   def self.core
+#    %w(router cloud_controller dea health_manager stager)
     %w(router cloud_controller dea health_manager stager)
+#    %w(cloud_controller)
   end
 
   def self.services
-    %w(redis mysql mongodb neo4j)
+#%w(redis mysql mongodb neo4j)
+    %w(redis)
   end
 
   def self.alias_args(args)

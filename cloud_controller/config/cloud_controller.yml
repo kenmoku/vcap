@@ -1,6 +1,6 @@
 ---
 # Cloud Controller URI
-external_uri: api.vcap.me
+external_uri: api.vcap.me:2222
 description: "VMware's Cloud Application Platform"
 support_address: http://support.cloudfoundry.com
 
@@ -11,7 +11,7 @@ support_address: http://support.cloudfoundry.com
 local_route: 127.0.0.1
 
 # Specifies if new users are allowed to register via VMC
-allow_registration: true
+allow_registration: false
 
 # Allow applications to register URIs that are outside your domain.
 # Legacy (FIXME REMOVE)
@@ -105,7 +105,7 @@ staging:
     password: ZNVfdase9
 
 # admin support
-admins: [derek@gmail.com, foobar@vmware.com]
+admins: [admin@vcap.me]
 https_required: false
 https_required_for_admins: false
 
