@@ -32,4 +32,6 @@ MAX_AGE_STALE     = 120 # Max stale age, unregistered if older then 2 minutes
 # 404 Response
 ERROR_404_RESPONSE="HTTP/1.1 404 Not Found\r\nConnection: close\r\n\r\n" +
                    "VCAP ROUTER: 404 - DESTINATION NOT FOUND\r\n".freeze
-
+# for WebSocket
+UPGRADE_HEADER         = 'Upgrade'.freeze
+WEBSOCKET              = 'websocket'.freeze

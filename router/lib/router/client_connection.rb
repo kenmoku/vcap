@@ -11,6 +11,7 @@ module ClientConnection
     # Default to be on the safe side
     @close_connection_after_request = true
     @is_unix_socket = is_unix_socket
+    @is_websocket = false
   end
 
   def post_init
@@ -66,6 +67,14 @@ module ClientConnection
 
   def process_request_body_chunk(data)
     return unless data
+
+    # if in websocket, simply forward it
+    if (@bound_app_conn && @is_websocket)
+      @bound_app_conn.send_data(data)
+      return
+    end
+
+
     if (@droplet && @bound_app_conn && !@bound_app_conn.error?)
 
       # Let parser process as well to properly determine end of message.
@@ -90,10 +99,13 @@ module ClientConnection
 
   # We have the HTTP Headers complete from the client
   def on_headers_complete(headers)
-    Router.log.debug "#{headers[HOST_HEADER]}"
-#    headers[HOST_HEADER].gsub!(/:?[0-9]*$/, "")
-    
+
     return close_connection unless headers and host = headers[HOST_HEADER]
+
+    # check is websocket or not
+    @is_websocket = (headers[UPGRADE_HEADER] == WEBSOCKET) ? true : false
+    Router.log.debug "websocket => @is_websocket"
+    Router.log.info "current session is websocket" if @is_websocket
 
     # Support for HTTP/1.1 connection reuse and possible pipelining
     @close_connection_after_request = (@parser.http_version.to_s == HTTP_11) ? false : true
@@ -156,6 +168,13 @@ module ClientConnection
 
     Router.log.debug "Routing on #{@droplet[:url]} to #{@droplet[:host]}:#{@droplet[:port]}"
 
+    # If current session is websocket, bind with WebsocketConnection
+    if @is_websocket
+      host, port = @droplet[:host], @droplet[:port]
+      @bound_app_conn = EM.connect(host, port, WebsocketConnection, self, @headers, @droplet)
+      return
+    end
+
     # Reuse an existing connection or create one.
     # Proxy the rest of the traffic without interference.
     Router.log.debug "Droplet has #{@droplet[:connections].size} pooled connections waiting.."
@@ -171,8 +190,10 @@ module ClientConnection
   end
 
   def on_message_complete
-    @parser = nil
-    :stop
+    if(!@is_websocket)
+      @parser = nil
+      :stop
+    end
   end
 
   def receive_data(data)

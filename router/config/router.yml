@@ -6,7 +6,7 @@ sock: /tmp/router.sock
 # NATS message bus URI
 mbus: nats://localhost:4222
 logging:
-  level: info
+  level: debug
 pid: /var/vcap/sys/run/router.pid
 
 # Used for /healthz and /vars endpoints. If not provided random

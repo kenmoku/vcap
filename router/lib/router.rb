@@ -22,6 +22,7 @@ $:.unshift(File.dirname(__FILE__))
 require 'router/const'
 require 'router/router'
 require 'router/app_connection'
+require 'router/websocket_connection'
 require 'router/client_connection'
 require 'router/utils'
 

@@ -436,7 +436,7 @@ module Run
 
   def self.core
 #    %w(router cloud_controller dea health_manager stager)
-    %w(router cloud_controller dea health_manager stager)
+    %w(cloud_controller dea health_manager stager)
 #    %w(cloud_controller)
   end
 

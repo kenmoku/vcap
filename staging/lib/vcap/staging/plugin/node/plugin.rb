@@ -24,10 +24,6 @@ class NodePlugin < StagingPlugin
   def startup_script
     vars = environment_hash
     ret = generate_startup_script(vars)
-    
-    #
-    p ret
-    ret
   end
 
   def stop_script
