@@ -208,6 +208,7 @@ class Router
         key_metrics[value] ||= {
           :requests => 0,
           :latency => VCAP::RollingMetric.new(60),
+          :responses_1xx => 0,
           :responses_2xx => 0,
           :responses_3xx => 0,
           :responses_4xx => 0,

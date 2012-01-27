@@ -1,16 +1,201 @@
 module WebsocketConnection
-  def initialize client, header, droplet
-    @client, @header, @droplet = client, header, droplet
+
+  attr_reader :outstanding_requests
+
+  def initialize client, request, droplet
+    Router.log.debug "Creating AppConnection for WebSocket"
+    @client, @request, @droplet = client, request, droplet
+    @start_time = Time.now
+    @connected = false
+    @outstanding_requests = 1
+    Router.outstanding_request_count += 1
   end
+
+  def post_init
+    VCAP::Component.varz[:app_connections] = Router.app_connection_count += 1
+    Router.log.debug "Completed AppConnection for WebSocket"
+    Router.log.debug Router.connection_stats
+    Router.log.debug "------------"
+  end
+
 
   def connection_completed
-    send_data(@header)
+    @connected = true
+    send_data(@request)
   end
 
-  def receive_data(data)
+  # queue data until connection completed.
+  def deliver_data(data)
+    return send_data(data) if @connected
+    @request << data
+  end
+
+  # When we have the WebSocket headers from server, check session and send it
+  # to client.
+  def on_headers_complete(headers)
+    check_sticky_session = STICKY_SESSIONS =~ headers[SET_COOKIE_HEADER]
+    sent_session_cookie = false # Only send one in case of multiple hits
+
+    header_lines = @headers.split("\r\n")
+    header_lines.each do |line|
+      @client.send_data(line)
+      @client.send_data(CR_LF)
+      if (check_sticky_session && !sent_session_cookie && STICKY_SESSIONS =~ line)
+        sid = Router.generate_session_cookie(@droplet)
+        scl = line.sub(/\S+\s*=\s*\w+/, "#{VCAP_SESSION_ID}=#{sid}")
+        sent_session_cookie = true
+        @client.send_data(scl)
+        @client.send_data(CR_LF)
+      end
+    end
+    # Trace if properly requested
+    if @client.trace
+      router_trace = "#{VCAP_ROUTER_HEADER}:#{Router.inet}#{CR_LF}"
+      be_trace = "#{VCAP_BACKEND_HEADER}:#{@droplet[:host]}:#{@droplet[:port]}#{CR_LF}"
+      @client.send_data(router_trace)
+      @client.send_data(be_trace)
+    end
+    # Ending CR_LF
+    @client.send_data(CR_LF)
+  end
+
+  # WebSocket's frame data from client will transfered as a chunked response body.
+  def process_response_body_chunk(data)
+    return unless data and data.bytesize > 0
+
+    # current implementation doesn't check WebSocket's frame
+    # so, simply bypass it.
     @client.send_data(data)
   end
 
+  # WebSocket's proper response code is 101 ;-)
+  # So, :response_1xx should be counted as a code metric.
+  def record_stats
+    return unless @parser
+
+    latency = ((Time.now - @start_time) * 1000).to_i
+    response_code = @parser.status_code
+    response_code_metric = :responses_xxx
+    if (100..199).include?(response_code)
+      response_code_metric = :responses_1xx
+    elsif (200..299).include?(response_code)
+      response_code_metric = :responses_2xx
+    elsif (300..399).include?(response_code)
+      response_code_metric = :responses_3xx
+    elsif (400..499).include?(response_code)
+      response_code_metric = :responses_4xx
+    elsif (500..599).include?(response_code)
+      response_code_metric = :responses_5xx
+    end
+
+    VCAP::Component.varz[response_code_metric] += 1
+    VCAP::Component.varz[:latency] << latency
+
+    if @droplet[:tags]
+      @droplet[:tags].each do |key, value|
+        tag_metrics = VCAP::Component.varz[:tags][key][value]
+        tag_metrics[response_code_metric] += 1
+        tag_metrics[:latency] << latency
+      end
+    end
+  end
+
+  # TODO check when below function is called.
+  # after handshake? or frame
+  def on_message_complete
+    record_stats
+    # @parser = nil
+    @outstanding_requests -= 1
+    Router.outstanding_request_count -= 1
+    :stop
+  end
+
+  # TODO I think websocket's connection should not be recycled.
+  # After cheking that, I'll delete below.
+  def cant_be_recycled?
+    #error? || @parser != nil || @connected == false || @outstanding_requests > 0
+    false
+  end
+
+  # TODO I think websocket's connection should not be recycled.
+  # After cheking that, I'll delete below.
+  def recycle
+    #stop_proxying
+    #@client = @request = @headers = nil
+  end
+
+  # On receive data from server, this will be callbacked
+  def receive_data(data)
+    # Parser is created after headers have been received and processed.
+    # After that we are continuing the processing of frame data.
+    return process_response_body_chunk(data) if @parser
+
+    # We are awaiting headers here.
+    # We buffer them if needed to determine the header/body boundary correctly.
+    @buf = @buf ? @buf << data : data
+    if hindex = @buf.index(HTTP_HEADERS_END) # all http headers received, figure out where to route to..
+      @parser = Http::Parser.new(self)
+
+      # split headers and rest of body out here.
+      @headers = @buf.slice!(0...hindex+HTTP_HEADERS_END_SIZE)
+
+      # Process headers
+      @parser << @headers
+
+      # Process left over body fragment if any
+      process_response_body_chunk(@buf) if @parser
+      @buf = @headers = nil
+    end
+
+  rescue Http::Parser::Error => e
+    Router.log.debug "HTTP Parser error on response: #{e}"
+    close_connection
+  end
+
+  def rebind(client, request)
+    @start_time = Time.now
+    @client = client
+    reuse(request)
+  end
+
+  def reuse(new_request)
+    @request = new_request
+    @outstanding_requests += 1
+    Router.outstanding_request_count += 1
+    deliver_data(@request)
+  end
+
+  def proxy_target_unbound
+    Router.log.debug "Proxy connection dropped"
+    #close_connection_after_writing
+  end
+
+  def unbind
+    Router.outstanding_request_count -= @outstanding_requests
+    unless @connected
+      Router.log.info "Could not connect to backend for url:#{@droplet[:url]} @ #{@droplet[:host]}:#{@droplet[:port]}"
+      if @client
+        @client.send_data(Router.notfound_redirect || ERROR_404_RESPONSE)
+        @client.close_connection_after_writing
+      end
+      # TODO(dlc) fix - We will unregister bad backends here, should retry the request if possible.
+      Router.unregister_droplet(@droplet[:url], @droplet[:host], @droplet[:port])
+    end
+
+    VCAP::Component.varz[:app_connections] = Router.app_connection_count -= 1
+    Router.log.debug 'Unbinding AppConnection'
+    Router.log.debug Router.connection_stats
+    Router.log.debug "------------"
+
+    # Remove ourselves from the connection pool
+    @droplet[:connections].delete(self)
+
+    @client.close_connection_after_writing if @client
+  end
+
   def terminate
+    stop_proxying
+    close_connection
+    on_message_complete if @outstanding_requests > 0
   end
 end

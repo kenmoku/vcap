@@ -168,7 +168,7 @@ module ClientConnection
 
     Router.log.debug "Routing on #{@droplet[:url]} to #{@droplet[:host]}:#{@droplet[:port]}"
 
-    # If current session is websocket, bind with WebsocketConnection
+    # If current session is websocket, connect to WebsocketConnection
     if @is_websocket
       host, port = @droplet[:host], @droplet[:port]
       @bound_app_conn = EM.connect(host, port, WebsocketConnection, self, @headers, @droplet)

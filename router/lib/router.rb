@@ -151,6 +151,7 @@ EM.run do
   # Setup some of our varzs..
   VCAP::Component.varz[:requests] = 0
   VCAP::Component.varz[:latency] = VCAP::RollingMetric.new(60)
+  VCAP::Component.varz[:responses_1xx] = 0
   VCAP::Component.varz[:responses_2xx] = 0
   VCAP::Component.varz[:responses_3xx] = 0
   VCAP::Component.varz[:responses_4xx] = 0
